@@ -3,11 +3,9 @@ import os
 from typing import Any, Dict, List, Optional, Tuple
 
 import pynvim
-from magma.images import Canvas, get_canvas_given_provider
 from magma.io import MagmaIOError, get_default_save_file, load, save
 from magma.magmabuffer import MagmaBuffer
 from magma.options import MagmaOptions
-from magma.outputbuffer import OutputBuffer
 from magma.runtime import get_available_kernels
 from magma.utils import DynamicPosition, MagmaException, Span, nvimui
 from pynvim import Nvim
@@ -16,7 +14,6 @@ from pynvim import Nvim
 @pynvim.plugin
 class Magma:
     nvim: Nvim
-    canvas: Optional[Canvas]
     initialized: bool
 
     highlight_namespace: int
@@ -32,7 +29,6 @@ class Magma:
         self.nvim = nvim
         self.initialized = False
 
-        self.canvas = None
         self.buffers = {}
         self.timer = None
 
@@ -41,21 +37,12 @@ class Magma:
 
         self.options = MagmaOptions(self.nvim)
 
-        self.canvas = get_canvas_given_provider(
-            self.options.image_provider, self.nvim
-        )
-        self.canvas.init()
-
         self.highlight_namespace = self.nvim.funcs.nvim_create_namespace(
             "magma-highlights"
         )
-        self.extmark_namespace = self.nvim.funcs.nvim_create_namespace(
-            "magma-extmarks"
-        )
+        self.extmark_namespace = self.nvim.funcs.nvim_create_namespace("magma-extmarks")
 
-        self.timer = self.nvim.eval(
-            "timer_start(500, 'MagmaTick', {'repeat': -1})"
-        )
+        self.timer = self.nvim.eval("timer_start(500, 'MagmaTick', {'repeat': -1})")
 
         self._set_autocommands()
 
@@ -63,32 +50,13 @@ class Magma:
 
     def _set_autocommands(self) -> None:
         self.nvim.command("augroup magma")
-        self.nvim.command(
-            "  autocmd CursorMoved  * call MagmaUpdateInterface()"
-        )
-        self.nvim.command(
-            "  autocmd CursorMovedI * call MagmaUpdateInterface()"
-        )
-        self.nvim.command(
-            "  autocmd WinScrolled  * call MagmaUpdateInterface()"
-        )
-        self.nvim.command(
-            "  autocmd BufEnter     * call MagmaUpdateInterface()"
-        )
-        self.nvim.command(
-            "  autocmd BufLeave     * call MagmaClearInterface()"
-        )
-        self.nvim.command(
-            "  autocmd BufUnload    * call MagmaOnBufferUnload()"
-        )
+        self.nvim.command("  autocmd BufUnload    * call MagmaOnBufferUnload()")
         self.nvim.command("  autocmd ExitPre      * call MagmaOnExitPre()")
         self.nvim.command("augroup END")
 
     def _deinitialize(self) -> None:
         for magma in self.buffers.values():
             magma.deinit()
-        if self.canvas is not None:
-            self.canvas.deinit()
         if self.timer is not None:
             self.nvim.funcs.timer_stop(self.timer)
 
@@ -105,31 +73,9 @@ class Magma:
             )
         return maybe_magma
 
-    def _clear_interface(self) -> None:
-        if not self.initialized:
-            return
-
-        for magma in self.buffers.values():
-            magma.clear_interface()
-        assert self.canvas is not None
-        self.canvas.present()
-
-    def _update_interface(self) -> None:
-        if not self.initialized:
-            return
-
-        magma = self._get_magma(False)
-        if magma is None:
-            return
-
-        magma.update_interface()
-
-    def _ask_for_choice(
-        self, preface: str, options: List[str]
-    ) -> Optional[str]:
+    def _ask_for_choice(self, preface: str, options: List[str]) -> Optional[str]:
         index: int = self.nvim.funcs.inputlist(
-            [preface]
-            + [f"{i+1}. {option}" for i, option in enumerate(options)]
+            [preface] + [f"{i+1}. {option}" for i, option in enumerate(options)]
         )
         if index == 0:
             return None
@@ -137,10 +83,8 @@ class Magma:
             return options[index - 1]
 
     def _initialize_buffer(self, kernel_name: str) -> MagmaBuffer:
-        assert self.canvas is not None
         magma = MagmaBuffer(
             self.nvim,
-            self.canvas,
             self.highlight_namespace,
             self.extmark_namespace,
             self.nvim.current.buffer,
@@ -152,7 +96,7 @@ class Magma:
 
         return magma
 
-    @pynvim.command("MagmaInit", nargs="?", sync=True, complete='file')  # type: ignore
+    @pynvim.command("MagmaInit", nargs="?", sync=True, complete="file")  # type: ignore
     @nvimui  # type: ignore
     def command_init(self, args: List[str]) -> None:
         self._initialize_if_necessary()
@@ -201,13 +145,9 @@ class Magma:
         magma = self._get_magma(True)
         assert magma is not None
 
-        self._clear_interface()
-
         self._deinit_buffer(magma)
 
-    def _do_evaluate(
-        self, pos: Tuple[Tuple[int, int], Tuple[int, int]]
-    ) -> None:
+    def _do_evaluate(self, pos: Tuple[Tuple[int, int], Tuple[int, int]]) -> None:
         self._initialize_if_necessary()
 
         magma = self._get_magma(True)
@@ -235,13 +175,6 @@ class Magma:
         )
         magma.run_code(expr, span)
 
-    @pynvim.command("MagmaEnterOutput", sync=True)  # type: ignore
-    @nvimui  # type: ignore
-    def command_enter_output_window(self) -> None:
-        magma = self._get_magma(True)
-        assert magma is not None
-        magma.enter_output()
-
     @pynvim.command("MagmaEvaluateArgument", nargs=1, sync=True)
     @nvimui
     def commnand_magma_evaluate_argument(self, expr) -> None:
@@ -256,8 +189,7 @@ class Magma:
         span = (
             (
                 lineno_begin - 1,
-                min(colno_begin, len(self.nvim.funcs.getline(lineno_begin)))
-                - 1,
+                min(colno_begin, len(self.nvim.funcs.getline(lineno_begin))) - 1,
             ),
             (
                 lineno_end - 1,
@@ -285,16 +217,6 @@ class Magma:
 
         self._do_evaluate(span)
 
-    @pynvim.command("MagmaReevaluateCell", nargs=0, sync=True)  # type: ignore
-    @nvimui  # type: ignore
-    def command_evaluate_cell(self) -> None:
-        self._initialize_if_necessary()
-
-        magma = self._get_magma(True)
-        assert magma is not None
-
-        magma.reevaluate_cell()
-
     @pynvim.command("MagmaInterrupt", nargs=0, sync=True)  # type: ignore
     @nvimui  # type: ignore
     def command_interrupt(self) -> None:
@@ -319,19 +241,6 @@ class Magma:
         magma = self._get_magma(True)
         assert magma is not None
 
-        magma.delete_cell()
-
-    @pynvim.command("MagmaShowOutput", nargs=0, sync=True)  # type: ignore
-    @nvimui  # type: ignore
-    def command_show_output(self) -> None:
-        self._initialize_if_necessary()
-
-        magma = self._get_magma(True)
-        assert magma is not None
-
-        magma.should_open_display_window = True
-        self._update_interface()
-
     @pynvim.command("MagmaSave", nargs="?", sync=True)  # type: ignore
     @nvimui  # type: ignore
     def command_save(self, args: List[str]) -> None:
@@ -340,9 +249,7 @@ class Magma:
         if args:
             path = args[0]
         else:
-            path = get_default_save_file(
-                self.options, self.nvim.current.buffer
-            )
+            path = get_default_save_file(self.options, self.nvim.current.buffer)
 
         dirname = os.path.dirname(path)
         if not os.path.exists(dirname):
@@ -362,9 +269,7 @@ class Magma:
         if args:
             path = args[0]
         else:
-            path = get_default_save_file(
-                self.options, self.nvim.current.buffer
-            )
+            path = get_default_save_file(self.options, self.nvim.current.buffer)
 
         if self.nvim.current.buffer.number in self.buffers:
             raise MagmaException(
@@ -387,8 +292,6 @@ class Magma:
             magma = self._initialize_buffer(kernel_name)
 
             load(magma, data)
-
-            self._update_interface()
         except MagmaIOError as err:
             if magma is not None:
                 self._deinit_buffer(magma)
@@ -396,11 +299,6 @@ class Magma:
             raise MagmaException("Error while doing Magma IO: " + str(err))
 
     # Internal functions which are exposed to VimScript
-
-    @pynvim.function("MagmaClearInterface", sync=True)  # type: ignore
-    @nvimui  # type: ignore
-    def function_clear_interface(self, _: Any) -> None:
-        self._clear_interface()
 
     @pynvim.function("MagmaOnBufferUnload", sync=True)  # type: ignore
     @nvimui  # type: ignore
@@ -431,11 +329,6 @@ class Magma:
 
         magma.tick()
 
-    @pynvim.function("MagmaUpdateInterface", sync=True)  # type: ignore
-    @nvimui  # type: ignore
-    def function_update_interface(self, _: Any) -> None:
-        self._update_interface()
-
     @pynvim.function("MagmaOperatorfunc", sync=True)  # type: ignore
     @nvimui  # type: ignore
     def function_magma_operatorfunc(self, args: List[str]) -> None:
@@ -453,15 +346,12 @@ class Magma:
         elif kind == "char":
             pass
         else:
-            raise MagmaException(
-                f"this kind of selection is not supported: '{kind}'"
-            )
+            raise MagmaException(f"this kind of selection is not supported: '{kind}'")
 
         span = (
             (
                 lineno_begin - 1,
-                min(colno_begin, len(self.nvim.funcs.getline(lineno_begin)))
-                - 1,
+                min(colno_begin, len(self.nvim.funcs.getline(lineno_begin))) - 1,
             ),
             (
                 lineno_end - 1,
@@ -470,23 +360,3 @@ class Magma:
         )
 
         self._do_evaluate(span)
-
-    @pynvim.function("MagmaDefineCell", sync=True)
-    def function_magma_define_cell(self, args: List[int]) -> None:
-        if not args:
-            return
-
-        self._initialize_if_necessary()
-        magma = self._get_magma(True)
-        assert magma is not None
-
-        start = args[0]
-        end = args[1]
-        bufno = self.nvim.current.buffer.number
-        span = Span(
-            DynamicPosition(
-                self.nvim, self.extmark_namespace, bufno, start - 1, 0
-            ),
-            DynamicPosition(self.nvim, self.extmark_namespace, bufno, end - 1, -1),
-        )
-        magma.outputs[span] = OutputBuffer(self.nvim, self.canvas, self.options)

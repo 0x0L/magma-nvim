@@ -5,8 +5,6 @@ from pynvim.api import Buffer
 
 from magma.utils import MagmaException, Span, DynamicPosition
 from magma.options import MagmaOptions
-from magma.outputchunks import OutputStatus, Output, to_outputchunk
-from magma.outputbuffer import OutputBuffer
 from magma.magmabuffer import MagmaBuffer
 
 
