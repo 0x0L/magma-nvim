@@ -1,14 +1,11 @@
-from typing import Optional, Tuple, List, Dict, Generator, IO, Any
+from typing import Tuple, List, Generator, IO
 from enum import Enum
 from contextlib import contextmanager
-from queue import Empty as EmptyQueueException
 import os
 import tempfile
 import json
 
 import jupyter_client
-
-from magma.options import MagmaOptions
 
 
 class RuntimeState(Enum):
@@ -26,9 +23,7 @@ class JupyterRuntime:
 
     allocated_files: List[str]
 
-    options: MagmaOptions
-
-    def __init__(self, kernel_name: str, options: MagmaOptions):
+    def __init__(self, kernel_name: str):
         self.state = RuntimeState.STARTING
         self.kernel_name = kernel_name
 
@@ -47,8 +42,6 @@ class JupyterRuntime:
 
             self.allocated_files = []
 
-            self.options = options
-
         else:
             kernel_file = kernel_name
             self.external_kernel = True
@@ -63,8 +56,6 @@ class JupyterRuntime:
             self.kernel_client.load_connection_file(connection_file=kernel_file)
 
             self.allocated_files = []
-
-            self.options = options
 
     def is_ready(self) -> bool:
         return self.state.value > RuntimeState.STARTING.value

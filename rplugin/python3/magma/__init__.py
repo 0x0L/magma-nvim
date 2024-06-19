@@ -1,11 +1,7 @@
-import json
-import os
 from typing import Any, Dict, List, Optional, Tuple
 
 import pynvim
-from magma.io import MagmaIOError, get_default_save_file, load, save
 from magma.magmabuffer import MagmaBuffer
-from magma.options import MagmaOptions
 from magma.runtime import get_available_kernels
 from magma.utils import DynamicPosition, MagmaException, Span, nvimui
 from pynvim import Nvim
@@ -23,8 +19,6 @@ class Magma:
 
     timer: Optional[int]
 
-    options: MagmaOptions
-
     def __init__(self, nvim: Nvim):
         self.nvim = nvim
         self.initialized = False
@@ -35,14 +29,10 @@ class Magma:
     def _initialize(self) -> None:
         assert not self.initialized
 
-        self.options = MagmaOptions(self.nvim)
-
         self.highlight_namespace = self.nvim.funcs.nvim_create_namespace(
             "magma-highlights"
         )
         self.extmark_namespace = self.nvim.funcs.nvim_create_namespace("magma-extmarks")
-
-        self.timer = self.nvim.eval("timer_start(500, 'MagmaTick', {'repeat': -1})")
 
         self._set_autocommands()
 
@@ -85,10 +75,7 @@ class Magma:
     def _initialize_buffer(self, kernel_name: str) -> MagmaBuffer:
         magma = MagmaBuffer(
             self.nvim,
-            self.highlight_namespace,
-            self.extmark_namespace,
             self.nvim.current.buffer,
-            self.options,
             kernel_name,
         )
 
@@ -227,76 +214,11 @@ class Magma:
 
     @pynvim.command("MagmaRestart", nargs=0, sync=True, bang=True)  # type: ignore # noqa
     @nvimui  # type: ignore
-    def command_restart(self, bang: bool) -> None:
+    def command(self) -> None:
         magma = self._get_magma(True)
         assert magma is not None
 
-        magma.restart(delete_outputs=bang)
-
-    @pynvim.command("MagmaDelete", nargs=0, sync=True)  # type: ignore
-    @nvimui  # type: ignore
-    def command_delete(self) -> None:
-        self._initialize_if_necessary()
-
-        magma = self._get_magma(True)
-        assert magma is not None
-
-    @pynvim.command("MagmaSave", nargs="?", sync=True)  # type: ignore
-    @nvimui  # type: ignore
-    def command_save(self, args: List[str]) -> None:
-        self._initialize_if_necessary()
-
-        if args:
-            path = args[0]
-        else:
-            path = get_default_save_file(self.options, self.nvim.current.buffer)
-
-        dirname = os.path.dirname(path)
-        if not os.path.exists(dirname):
-            os.makedirs(dirname)
-
-        magma = self._get_magma(True)
-        assert magma is not None
-
-        with open(path, "w") as file:
-            json.dump(save(magma), file)
-
-    @pynvim.command("MagmaLoad", nargs="?", sync=True)  # type: ignore
-    @nvimui  # type: ignore
-    def command_load(self, args: List[str]) -> None:
-        self._initialize_if_necessary()
-
-        if args:
-            path = args[0]
-        else:
-            path = get_default_save_file(self.options, self.nvim.current.buffer)
-
-        if self.nvim.current.buffer.number in self.buffers:
-            raise MagmaException(
-                "Magma is already initialized; MagmaLoad initializes Magma."
-            )
-
-        with open(path) as file:
-            data = json.load(file)
-
-        magma = None
-
-        try:
-            MagmaIOError.assert_has_key(data, "version", int)
-            if (version := data["version"]) != 1:
-                raise MagmaIOError(f"Bad version: {version}")
-
-            MagmaIOError.assert_has_key(data, "kernel", str)
-            kernel_name = data["kernel"]
-
-            magma = self._initialize_buffer(kernel_name)
-
-            load(magma, data)
-        except MagmaIOError as err:
-            if magma is not None:
-                self._deinit_buffer(magma)
-
-            raise MagmaException("Error while doing Magma IO: " + str(err))
+        magma.restart()
 
     # Internal functions which are exposed to VimScript
 
@@ -317,17 +239,6 @@ class Magma:
     @nvimui  # type: ignore
     def function_on_exit_pre(self, _: Any) -> None:
         self._deinitialize()
-
-    @pynvim.function("MagmaTick", sync=True)  # type: ignore
-    @nvimui  # type: ignore
-    def function_magma_tick(self, _: Any) -> None:
-        self._initialize_if_necessary()
-
-        magma = self._get_magma(False)
-        if magma is None:
-            return
-
-        magma.tick()
 
     @pynvim.function("MagmaOperatorfunc", sync=True)  # type: ignore
     @nvimui  # type: ignore
